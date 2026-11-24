@@ -312,6 +312,46 @@ test("game controller accepts normal moves with default promotion", () => {
     assert.equal(game.state.turn, COLORS.WHITE);
 });
 
+test("ordinary moves are not counted as promotions", () => {
+    const game = createGame({ mode: "local" });
+
+    assert.equal(game.moveNotation("e2", "e4").success, true);
+    assert.equal(game.getStatistics().promotions, 0);
+
+    game.state.board = Array(64).fill(null);
+    game.state.board[8] = {
+        type: PIECES.PAWN,
+        color: COLORS.WHITE
+    };
+    game.state.board[60] = {
+        type: PIECES.KING,
+        color: COLORS.WHITE
+    };
+    game.state.board[4] = {
+        type: PIECES.KING,
+        color: COLORS.BLACK
+    };
+    game.state.turn = COLORS.WHITE;
+
+    assert.equal(
+        game.move(8, 0, PIECES.KNIGHT).success,
+        true
+    );
+    assert.equal(game.getStatistics().promotions, 1);
+});
+
+test("AI search can be cancelled at recursion boundaries", () => {
+    let checks = 0;
+
+    const move = findBestMove(createInitialState(), {
+        difficulty: "hard",
+        shouldCancel: () => ++checks > 2
+    });
+
+    assert.equal(move, null);
+    assert.ok(checks > 2);
+});
+
 test("state can be rebuilt from validated move records", () => {
     const original = positionsFrom(createInitialState(), [
         ["e2", "e4"],

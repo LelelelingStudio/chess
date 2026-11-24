@@ -51,7 +51,7 @@ export class ChessAnimations {
 
         this.gravestoneContainer =
             options.gravestoneContainer ??
-            document.querySelector("#captured-pieces");
+            null;
 
         this.gravestoneContainers =
             options.gravestoneContainers ?? null;
@@ -65,6 +65,10 @@ export class ChessAnimations {
         this.animations = new Set();
 
         this.destroyed = false;
+    }
+
+    get activeCount() {
+        return this.animations.size;
     }
 
     // ========================================

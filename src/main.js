@@ -30,7 +30,11 @@ import {
     ONLINE_EVENTS
 } from "./online.js";
 
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.2.0";
+
+const SCORE_WIN = 100;
+const SCORE_DRAW = 50;
+const SCORE_LOSS = 0;
 
 const PROMOTION_OPTIONS = [
     PIECES.QUEEN,
@@ -62,6 +66,11 @@ class ChessApp {
         this.difficulty =
             this.settings.difficulty ?? "medium";
 
+        this.playerColor =
+            this.settings.playerColor === COLORS.BLACK
+                ? COLORS.BLACK
+                : COLORS.WHITE;
+
         this.endHandled = false;
         this.toastTimer = null;
 
@@ -77,6 +86,7 @@ class ChessApp {
             "resign-button",
             "restart-button", "back-button", "language-toggle",
             "settings-button", "ai-panel", "difficulty-select",
+            "ai-side-select",
             "online-panel", "connection-status", "connection-label",
             "online-room-code", "create-room-button", "room-input",
             "join-room-button", "signal-local", "signal-remote",
@@ -216,6 +226,26 @@ class ChessApp {
             }
         );
 
+        this.elements["ai-side-select"].addEventListener(
+            "change",
+            event => {
+                this.playerColor =
+                    event.target.value === COLORS.BLACK
+                        ? COLORS.BLACK
+                        : COLORS.WHITE;
+
+                const saved = storage.saveSettings({
+                    playerColor: this.playerColor
+                });
+
+                this.settings = saved
+                    ? storage.getSettings()
+                    : this.settings;
+
+                this.newGame("computer");
+            }
+        );
+
         this.elements["create-room-button"].addEventListener(
             "click",
             () => this.createOnlineRoom()
@@ -253,17 +283,42 @@ class ChessApp {
 
     onLanguageChanged(language) {
         document.documentElement.lang = language;
+        document.title = this.t("pageTitle");
+
+        const description = document.querySelector(
+            'meta[name="description"]'
+        );
+
+        if (description) {
+            description.content = this.t("pageDescription");
+        }
 
         this.elements["language-toggle"].textContent =
-            language === "en" ? "中文" : "English";
+            this.t(
+                language === "en"
+                    ? "switchToChinese"
+                    : "switchToEnglish"
+            );
 
         document.querySelectorAll("[data-i18n]").forEach(node => {
             node.textContent = this.t(node.dataset.i18n);
         });
 
+        document.querySelectorAll("[data-i18n-attr]").forEach(node => {
+            for (const entry of node.dataset.i18nAttr.split(";")) {
+                const [attribute, key] = entry.split(":");
+
+                if (attribute && key) {
+                    node.setAttribute(attribute, this.t(key));
+                }
+            }
+        });
+
         this.ui?.setLanguage(language);
 
-        storage.saveSettings({ language });
+        this.settings = storage.saveSettings({ language })
+            ? storage.getSettings()
+            : this.settings;
     }
 
     // ========================================
@@ -322,12 +377,17 @@ class ChessApp {
         this.ui.clearSelection(false);
 
         this.elements["difficulty-select"].value = this.difficulty;
+        this.elements["ai-side-select"].value = this.playerColor;
 
         this.updatePlayerNames();
         this.updateControls();
 
         if (mode === "computer") {
             this.fallbackAI.setDifficulty(this.difficulty);
+
+            if (this.playerColor === COLORS.BLACK) {
+                this.requestAI();
+            }
         }
     }
 
@@ -337,7 +397,7 @@ class ChessApp {
         if (this.currentMode === "local") return true;
 
         if (this.currentMode === "computer") {
-            return this.game.state.turn === COLORS.WHITE &&
+            return this.game.state.turn === this.humanColor() &&
                 !this.aiBusy;
         }
 
@@ -432,7 +492,7 @@ class ChessApp {
         if (
             this.currentMode === "computer" &&
             !this.game.gameOver &&
-            this.game.state.turn === COLORS.BLACK
+            this.game.state.turn !== this.humanColor()
         ) {
             this.requestAI();
         }
@@ -485,10 +545,10 @@ class ChessApp {
         const result = snapshot.result;
         const score =
             result.winner === null
-                ? 50
+                ? SCORE_DRAW
                 : result.winner === this.humanColor()
-                    ? 100
-                    : 0;
+                    ? SCORE_WIN
+                    : SCORE_LOSS;
 
         if (this.currentMode !== "local") {
             const outcome =
@@ -520,10 +580,8 @@ class ChessApp {
         this.lastScore = score;
 
         if (this.currentMode !== "local") {
-            leleleSDK.ensureSDK().then(() => {
-                leleleSDK.submitScore(score, {
-                    name: this.playerName ?? undefined
-                });
+            leleleSDK.submitScore(score, {
+                name: this.playerName ?? undefined
             });
         }
 
@@ -533,6 +591,10 @@ class ChessApp {
     humanColor() {
         if (this.currentMode === "online") {
             return this.online?.localColor ?? COLORS.WHITE;
+        }
+
+        if (this.currentMode === "computer") {
+            return this.playerColor;
         }
 
         return COLORS.WHITE;
@@ -602,7 +664,7 @@ class ChessApp {
                 this.openLeaderboardDialog();
             }
 
-            if (action === "next") leleleSDK.nextGame();
+            if (action === "next") await leleleSDK.nextGame();
         });
     }
 
@@ -626,13 +688,11 @@ class ChessApp {
 
         const value = Number(rating.split("-")[1]);
 
-        leleleSDK.ensureSDK().then(() => {
-            const ok = leleleSDK.submitRating(value);
+        const ok = await leleleSDK.submitRating(value);
 
-            this.toast(
-                ok ? this.t("gameSaved") : this.t("somethingWentWrong")
-            );
-        });
+        this.toast(
+            ok ? this.t("gameSaved") : this.t("somethingWentWrong")
+        );
     }
 
     async openLeaderboardDialog() {
@@ -692,7 +752,7 @@ class ChessApp {
                     this.game &&
                     !this.game.gameOver &&
                     this.currentMode === "computer" &&
-                    this.game.state.turn === COLORS.BLACK
+                    this.game.state.turn !== this.humanColor()
                 ) {
                     const requestId = this.aiRequestId;
                     const state = this.game.getSnapshot().state;
@@ -702,7 +762,10 @@ class ChessApp {
                     setTimeout(() => {
                         this.applyAIMove(
                             requestId,
-                            this.fallbackAI.getMove(state)
+                            this.fallbackAI.getMove(state, {
+                                shouldCancel: () =>
+                                    requestId !== this.aiRequestId
+                            })
                         );
                     }, 0);
 
@@ -723,7 +786,8 @@ class ChessApp {
         if (
             !this.game ||
             this.game.gameOver ||
-            this.game.state.turn !== COLORS.BLACK ||
+            this.currentMode !== "computer" ||
+            this.game.state.turn === this.humanColor() ||
             this.aiBusy
         ) {
             return;
@@ -763,7 +827,10 @@ class ChessApp {
                 return;
             }
 
-            const move = this.fallbackAI.getMove(state);
+            const move = this.fallbackAI.getMove(state, {
+                shouldCancel: () =>
+                    requestId !== this.aiRequestId
+            });
 
             this.applyAIMove(requestId, move);
         }, 0);
@@ -800,7 +867,7 @@ class ChessApp {
             !this.aiBusy ||
             !this.game ||
             this.game.gameOver ||
-            this.game.state.turn !== COLORS.BLACK
+            this.game.state.turn === this.humanColor()
         ) {
             return;
         }
@@ -820,7 +887,7 @@ class ChessApp {
         const result = this.ui.applyIndices(
             move.from,
             move.to,
-            move.promotion ?? PIECES.QUEEN
+            move.promotion ?? null
         );
 
         if (!result?.success) {
@@ -871,8 +938,17 @@ class ChessApp {
 
     onlinePlayerId() {
         if (!this._onlinePlayerId) {
+            const random =
+                typeof crypto !== "undefined" &&
+                typeof crypto.getRandomValues === "function"
+                    ? Array.from(
+                        crypto.getRandomValues(new Uint8Array(6)),
+                        byte => byte.toString(16).padStart(2, "0")
+                    ).join("")
+                    : `${Date.now().toString(36)}`;
+
             this._onlinePlayerId =
-                `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+                `${Date.now().toString(36)}-${random}`;
         }
 
         return this._onlinePlayerId;
@@ -884,7 +960,7 @@ class ChessApp {
         return this.game.state.moveHistory.map(move => ({
             from: squareToNotation(move.from),
             to: squareToNotation(move.to),
-            promotion: move.promotion ?? PIECES.QUEEN
+            promotion: move.promotion ?? null
         }));
     }
 
@@ -1077,7 +1153,7 @@ class ChessApp {
             const result = this.ui.applyIndices(
                 from,
                 to,
-                message.move.promotion ?? PIECES.QUEEN
+                message.move.promotion ?? null
             );
 
             if (!result?.success) {
@@ -1508,8 +1584,8 @@ class ChessApp {
                     primary: true
                 },
                 { id: "load", label: this.t("gameLoaded") },
-                { id: "export", label: "Export" },
-                { id: "import", label: "Import" },
+                { id: "export", label: this.t("export") },
+                { id: "import", label: this.t("import") },
                 { id: "clear", label: this.t("clearData") }
             ]
         });
@@ -1664,4 +1740,14 @@ class ChessApp {
     }
 }
 
-window.leleleChess = new ChessApp();
+function startChessApp() {
+    window.leleleChess = new ChessApp();
+}
+
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", startChessApp, {
+        once: true
+    });
+} else {
+    startChessApp();
+}

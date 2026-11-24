@@ -56,6 +56,57 @@ test("importData reports failed writes", () => {
     assert.equal(result, false);
 });
 
+test("settings and statistics ignore unknown or invalid fields", () => {
+    const storage = new ChessStorage();
+
+    values.clear();
+
+    storage.saveSettings({
+        difficulty: "hard",
+        playerColor: "black",
+        injected: "bad"
+    });
+
+    const settings = storage.getSettings();
+
+    assert.equal(settings.difficulty, "hard");
+    assert.equal(settings.playerColor, "black");
+    assert.equal("injected" in settings, false);
+
+    storage.saveStatistics({
+        gamesPlayed: "7",
+        gamesWon: -3,
+        injected: true
+    });
+
+    const stats = storage.getStatistics();
+
+    assert.equal(stats.gamesPlayed, 7);
+    assert.equal(stats.gamesWon, 0);
+    assert.equal("injected" in stats, false);
+});
+
+test("export includes schema version and legacy imports still work", () => {
+    const storage = new ChessStorage();
+
+    values.clear();
+
+    const exported = storage.exportData();
+
+    assert.equal(exported.application, "Lelele Games Chess");
+    assert.equal(exported.schemaVersion, 2);
+
+    assert.equal(
+        storage.importData({
+            application: "Lelele Chess",
+            settings: { language: "zh" }
+        }),
+        true
+    );
+
+    assert.equal(storage.getSettings().language, "zh");
+});
+
 test("clearAll also removes the standalone language key", () => {
     const storage = new ChessStorage();
 

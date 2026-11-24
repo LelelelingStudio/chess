@@ -38,16 +38,31 @@ export function ensureSDK() {
         );
 
         const script = existing ?? document.createElement("script");
+        let settled = false;
+        let timeoutId = null;
 
-        const finish = sdk => resolve(sdk ?? getGlobalSDK() ?? null);
+        const finish = sdk => {
+            if (settled) return;
+
+            settled = true;
+
+            if (timeoutId !== null) clearTimeout(timeoutId);
+
+            const resolved = sdk ?? getGlobalSDK() ?? null;
+
+            if (!resolved) loadPromise = null;
+
+            resolve(resolved);
+        };
 
         script.addEventListener("load", () => finish(getGlobalSDK()), {
             once: true
         });
 
-        script.addEventListener("error", () => finish(null), {
-            once: true
-        });
+        script.addEventListener("error", () => {
+            script.remove();
+            finish(null);
+        }, { once: true });
 
         if (!existing) {
             script.src = SDK_URL;
@@ -56,7 +71,10 @@ export function ensureSDK() {
         }
 
         // Avoid waiting forever when the site is offline.
-        setTimeout(() => finish(getGlobalSDK()), 4000);
+        timeoutId = setTimeout(
+            () => finish(getGlobalSDK()),
+            4000
+        );
     });
 
     return loadPromise;
@@ -78,20 +96,28 @@ export async function getPlayerName() {
     }
 }
 
-export function submitScore(score, options = {}) {
-    const sdk = getGlobalSDK();
+export async function submitScore(score, options = {}) {
+    const sdk = await ensureSDK();
 
     if (!sdk || !Number.isFinite(score) || score < 0) return false;
 
-    return sdk.submitScore(score, options) === true;
+    try {
+        return sdk.submitScore(score, options) === true;
+    } catch {
+        return false;
+    }
 }
 
-export function submitRating(rating) {
-    const sdk = getGlobalSDK();
+export async function submitRating(rating) {
+    const sdk = await ensureSDK();
 
     if (!sdk) return false;
 
-    return sdk.submitRating(rating) === true;
+    try {
+        return sdk.submitRating(rating) === true;
+    } catch {
+        return false;
+    }
 }
 
 export async function getLeaderboard() {
@@ -120,20 +146,28 @@ export async function shareScore(score, text) {
     }
 }
 
-export function nextGame(options = {}) {
-    const sdk = getGlobalSDK();
+export async function nextGame(options = {}) {
+    const sdk = await ensureSDK();
 
     if (!sdk) return false;
 
-    return sdk.nextGame(options) === true;
+    try {
+        return sdk.nextGame(options) === true;
+    } catch {
+        return false;
+    }
 }
 
-export function openDetail() {
-    const sdk = getGlobalSDK();
+export async function openDetail() {
+    const sdk = await ensureSDK();
 
     if (!sdk) return false;
 
-    return sdk.openDetail() === true;
+    try {
+        return sdk.openDetail() === true;
+    } catch {
+        return false;
+    }
 }
 
 export const leleleSDK = {

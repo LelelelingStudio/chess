@@ -25,7 +25,7 @@ server, no Python backend and no database are required at runtime.
 ES Modules require HTTP, so open the folder through a static server:
 
 ```bash
-cd chess
+cd /path/to/chess
 python3 -m http.server 8000
 # then open http://localhost:8000/
 ```
@@ -68,7 +68,9 @@ Limitations:
 
 The official SDK exposes `window.LeleleSDK` (it has no `init()` method and no ES
 module export). See <https://game.leleleling.site/sdk-docs>. Outside the
-platform player all SDK operations safely no-op.
+platform player all SDK operations safely no-op. The adapter waits for SDK
+readiness; `submitScore`, `submitRating`, `nextGame` and `openDetail` return
+`Promise<boolean>`.
 
 ## Tests
 
@@ -76,8 +78,8 @@ Rule, AI, protocol and storage-independent tests use only Node's built-in test
 runner:
 
 ```bash
-cd chess
-node --test tests/*.test.mjs
+cd /path/to/chess
+npm test
 ```
 
 Browser smoke tests require a static server; the project has no Playwright or

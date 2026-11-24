@@ -31,7 +31,8 @@ export const DEFAULT_SETTINGS = {
     boardTheme: "classic",
     pieceTheme: "classic",
     autoQueenPromotion: true,
-    difficulty: "medium"
+    difficulty: "medium",
+    playerColor: "white"
 };
 
 export const DEFAULT_STATISTICS = {
@@ -45,6 +46,17 @@ export const DEFAULT_STATISTICS = {
     lastPlayed: null
 };
 
+export const SCHEMA_VERSION = 2;
+
+const APPLICATION_NAME = "Lelele Games Chess";
+const LEGACY_APPLICATION_NAMES = new Set(["Lelele Chess"]);
+const LEGACY_LANGUAGE_KEY = "lelele-chess-language";
+
+const SETTINGS_FIELDS = new Set(Object.keys(DEFAULT_SETTINGS));
+const STATISTIC_FIELDS = Object.keys(DEFAULT_STATISTICS).filter(
+    key => key !== "lastPlayed"
+);
+
 // ============================================
 // Storage Manager
 // ============================================
@@ -55,6 +67,7 @@ export class ChessStorage {
             options.prefix ?? STORAGE_PREFIX;
 
         this.storage = null;
+        this.lastError = null;
 
         this.available = false;
 
@@ -117,10 +130,15 @@ export class ChessStorage {
 
             return true;
         } catch (error) {
-            console.error(
-                "Storage save error:",
-                error
-            );
+            this.lastError = error;
+
+            if (error?.name === "QuotaExceededError") {
+                console.warn(
+                    "Storage quota exceeded; data was not saved."
+                );
+            } else {
+                console.warn("Storage save error:", error);
+            }
 
             return false;
         }
@@ -167,6 +185,60 @@ export class ChessStorage {
         }
     }
 
+    sanitizeSettings(input = {}) {
+        const output = { ...DEFAULT_SETTINGS };
+
+        if (!input || typeof input !== "object" || Array.isArray(input)) {
+            return output;
+        }
+
+        for (const [key, value] of Object.entries(input)) {
+            if (!SETTINGS_FIELDS.has(key)) continue;
+
+            if (typeof DEFAULT_SETTINGS[key] === "boolean") {
+                output[key] = Boolean(value);
+            } else if (typeof value === "string") {
+                output[key] = value;
+            }
+        }
+
+        if (!["easy", "medium", "hard"].includes(output.difficulty)) {
+            output.difficulty = DEFAULT_SETTINGS.difficulty;
+        }
+
+        if (!["en", "zh"].includes(output.language)) {
+            output.language = DEFAULT_SETTINGS.language;
+        }
+
+        if (![ "white", "black" ].includes(output.playerColor)) {
+            output.playerColor = DEFAULT_SETTINGS.playerColor;
+        }
+
+        return output;
+    }
+
+    sanitizeStatistics(input = {}) {
+        const output = { ...DEFAULT_STATISTICS };
+
+        if (!input || typeof input !== "object" || Array.isArray(input)) {
+            return output;
+        }
+
+        for (const key of STATISTIC_FIELDS) {
+            const value = Number(input[key]);
+
+            if (Number.isFinite(value) && value >= 0) {
+                output[key] = Math.floor(value);
+            }
+        }
+
+        if (typeof input.lastPlayed === "string") {
+            output.lastPlayed = input.lastPlayed;
+        }
+
+        return output;
+    }
+
     // ========================================
     // Settings
     // ========================================
@@ -177,23 +249,25 @@ export class ChessStorage {
             {}
         );
 
-        const settings = {
-            ...DEFAULT_SETTINGS,
-            ...(
-                saved &&
-                typeof saved === "object" &&
-                !Array.isArray(saved)
-                    ? saved
-                    : {}
-            )
-        };
+        const settings = this.sanitizeSettings(saved);
 
-        if (!["easy", "medium", "hard"].includes(settings.difficulty)) {
-            settings.difficulty = DEFAULT_SETTINGS.difficulty;
-        }
+        if (
+            saved &&
+            typeof saved === "object" &&
+            !("language" in saved)
+        ) {
+            try {
+                const legacy = this.storage?.getItem(
+                    LEGACY_LANGUAGE_KEY
+                );
 
-        if (!["en", "zh"].includes(settings.language)) {
-            settings.language = DEFAULT_SETTINGS.language;
+                if (legacy === "en" || legacy === "zh") {
+                    settings.language = legacy;
+                    this.storage.removeItem(LEGACY_LANGUAGE_KEY);
+                }
+            } catch {
+                // Ignore legacy migration failures.
+            }
         }
 
         return settings;
@@ -209,27 +283,26 @@ export class ChessStorage {
         }
 
         const current = this.getSettings();
+        const updates = {};
 
-        const updated = {
-            ...current,
-            ...settings
-        };
+        for (const key of Object.keys(settings)) {
+            if (SETTINGS_FIELDS.has(key)) updates[key] = settings[key];
+        }
 
         return this.set(
             STORAGE_KEYS.SETTINGS,
-            updated
+            this.sanitizeSettings({ ...current, ...updates })
         );
     }
 
     updateSetting(key, value) {
+        if (!SETTINGS_FIELDS.has(key)) return false;
+
         const settings = this.getSettings();
 
         settings[key] = value;
 
-        return this.set(
-            STORAGE_KEYS.SETTINGS,
-            settings
-        );
+        return this.saveSettings(settings);
     }
 
     resetSettings() {
@@ -244,21 +317,9 @@ export class ChessStorage {
     // ========================================
 
     getStatistics() {
-        const saved = this.get(
-            STORAGE_KEYS.STATISTICS,
-            {}
+        return this.sanitizeStatistics(
+            this.get(STORAGE_KEYS.STATISTICS, {})
         );
-
-        return {
-            ...DEFAULT_STATISTICS,
-            ...(
-                saved &&
-                typeof saved === "object" &&
-                !Array.isArray(saved)
-                    ? saved
-                    : {}
-            )
-        };
     }
 
     saveStatistics(statistics) {
@@ -272,10 +333,7 @@ export class ChessStorage {
 
         return this.set(
             STORAGE_KEYS.STATISTICS,
-            {
-                ...DEFAULT_STATISTICS,
-                ...statistics
-            }
+            this.sanitizeStatistics(statistics)
         );
     }
 
@@ -455,7 +513,8 @@ export class ChessStorage {
 
     exportData() {
         return {
-            application: "Lelele Chess",
+            application: APPLICATION_NAME,
+            schemaVersion: SCHEMA_VERSION,
             exportedAt: new Date().toISOString(),
             settings: this.getSettings(),
             statistics: this.getStatistics(),
@@ -477,7 +536,21 @@ export class ChessStorage {
             return false;
         }
 
-        if (data.application !== "Lelele Chess") {
+        const application =
+            data.application ?? data.appName;
+
+        if (
+            application !== APPLICATION_NAME &&
+            !LEGACY_APPLICATION_NAMES.has(application)
+        ) {
+            return false;
+        }
+
+        const schemaVersion = Number(
+            data.schemaVersion ?? 1
+        );
+
+        if (!Number.isFinite(schemaVersion) || schemaVersion > SCHEMA_VERSION) {
             return false;
         }
 
@@ -546,7 +619,7 @@ export class ChessStorage {
             }
 
             try {
-                this.storage.removeItem("lelele-chess-language");
+                this.storage.removeItem(LEGACY_LANGUAGE_KEY);
             } catch {
                 // Already removed or inaccessible.
             }
@@ -574,9 +647,29 @@ export class ChessStorage {
             return crypto.randomUUID();
         }
 
+        if (
+            typeof crypto !== "undefined" &&
+            typeof crypto.getRandomValues === "function"
+        ) {
+            const bytes = new Uint8Array(8);
+
+            crypto.getRandomValues(bytes);
+
+            return (
+                Date.now().toString(36) +
+                "-" +
+                Array.from(bytes, byte =>
+                    byte.toString(16).padStart(2, "0")
+                ).join("")
+            );
+        }
+
+        this._idCounter = (this._idCounter ?? 0) + 1;
+
         return (
             Date.now().toString(36) +
-            Math.random().toString(36).slice(2)
+            "-" +
+            this._idCounter.toString(36)
         );
     }
 }

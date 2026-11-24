@@ -18,9 +18,9 @@
 <body>
   <div id="app" class="app">
     <header class="app-header">
-      <a class="brand" href="./" aria-label="Chess home">CHESS</a>
+      <a class="brand" href="./" data-i18n-attr="aria-label:brandLabel" aria-label="Chess home">CHESS</a>
       <div class="header-actions">
-        <button id="language-toggle" class="icon-button" type="button" aria-label="Switch language">中文</button>
+        <button id="language-toggle" class="icon-button" type="button" data-i18n-attr="aria-label:switchLanguage" aria-label="Switch language">中文</button>
         <button id="settings-button" class="icon-button" type="button" data-i18n="settings">Settings</button>
       </div>
     </header>
@@ -47,7 +47,7 @@
         </div>
       </section>
 
-      <section id="game-screen" class="game-screen" hidden aria-label="Chess game">
+      <section id="game-screen" class="game-screen" hidden data-i18n-attr="aria-label:chessGameLabel" aria-label="Chess game">
         <div id="game-status" class="game-status" role="status" aria-live="polite" data-state="playing">White to move</div>
 
         <div id="online-panel" class="online-panel" hidden>
@@ -90,6 +90,11 @@
             <option value="medium" data-i18n="medium">Medium</option>
             <option value="hard" data-i18n="hard">Hard</option>
           </select>
+          <label class="form-label" for="ai-side-select" data-i18n="sideLabel">Play as</label>
+          <select id="ai-side-select" class="form-select">
+            <option value="white" data-i18n="playAsWhite">White</option>
+            <option value="black" data-i18n="playAsBlack">Black</option>
+          </select>
         </div>
 
         <div id="players-row" class="players-row">
@@ -128,7 +133,7 @@
 
     <footer class="app-footer">
       <span data-i18n="madeBy">Made by Lelele Games</span>
-      <span>Think carefully. Enjoy the game.</span>
+      <span data-i18n="footerQuote">Think carefully. Enjoy the game.</span>
     </footer>
   </div>
 

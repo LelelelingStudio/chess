@@ -13,7 +13,7 @@ export const SUPPORTED_LANGUAGES = {
 
 export const DEFAULT_LANGUAGE = SUPPORTED_LANGUAGES.EN;
 
-const STORAGE_KEY = "lelele-chess-language";
+const LEGACY_STORAGE_KEY = "lelele-chess-language";
 
 // ============================================
 // Translation Dictionary
@@ -31,6 +31,29 @@ export const TRANSLATIONS = {
         save: "Save",
         loading: "Loading...",
         settings: "Settings",
+        pageTitle: "Chess — Lelele Games",
+        pageDescription: "A cozy, modern chess game with local, computer, and online play.",
+        brandLabel: "Chess home",
+        switchLanguage: "Switch language",
+        switchToChinese: "中文",
+        switchToEnglish: "English",
+        footerQuote: "Think carefully. Enjoy the game.",
+        chessGameLabel: "Chess game",
+        turnStatus: "{side} to move",
+        checkmateStatus: "{winner} wins by checkmate",
+        stalemateStatus: "Stalemate",
+        drawStatus: "Draw ({reason})",
+        reasonFifty: "50-move rule",
+        reasonRepetition: "threefold repetition",
+        reasonMaterial: "insufficient material",
+        inCheckStatus: "{side} is in check",
+        resignStatus: "{winner} wins by resignation",
+        drawAgreementStatus: "Draw by agreement",
+        sideLabel: "Play as",
+        playAsWhite: "White",
+        playAsBlack: "Black",
+        export: "Export",
+        import: "Import",
 
         // Main menu
         mainMenu: "Main Menu",
@@ -78,7 +101,6 @@ export const TRANSLATIONS = {
         // Controls
         undo: "Undo",
         redo: "Redo",
-        redo: "Redo",
         restart: "Restart",
         resign: "Resign",
         offerDraw: "Offer Draw",
@@ -122,7 +144,7 @@ export const TRANSLATIONS = {
 
         // Notifications
         movePlayed: "Move played",
-        invalidMove: "Invalid move",
+
         selectPiece: "Select a piece",
         yourTurn: "Your turn",
         opponentTurn: "Opponent's turn",
@@ -196,6 +218,29 @@ export const TRANSLATIONS = {
         save: "保存",
         loading: "加载中...",
         settings: "设置",
+        pageTitle: "国际象棋 — 了了了游",
+        pageDescription: "一款可在本地、人机和联机模式下游玩的现代国际象棋游戏。",
+        brandLabel: "国际象棋首页",
+        switchLanguage: "切换语言",
+        switchToChinese: "中文",
+        switchToEnglish: "English",
+        footerQuote: "静心思考，享受对弈。",
+        chessGameLabel: "国际象棋对局",
+        turnStatus: "{side}回合",
+        checkmateStatus: "{winner}获胜！将死",
+        stalemateStatus: "逼和",
+        drawStatus: "和棋（{reason}）",
+        reasonFifty: "50 步规则",
+        reasonRepetition: "三次重复",
+        reasonMaterial: "子力不足",
+        inCheckStatus: "{side}被将军",
+        resignStatus: "{winner}获胜（认输）",
+        drawAgreementStatus: "和棋",
+        sideLabel: "执棋",
+        playAsWhite: "白方",
+        playAsBlack: "黑方",
+        export: "导出",
+        import: "导入",
 
         // Main menu
         mainMenu: "主菜单",
@@ -243,7 +288,6 @@ export const TRANSLATIONS = {
         // Controls
         undo: "悔棋",
         redo: "重做",
-        redo: "重做",
         restart: "重新开始",
         resign: "认输",
         offerDraw: "提出和棋",
@@ -287,7 +331,7 @@ export const TRANSLATIONS = {
 
         // Notifications
         movePlayed: "已走棋",
-        invalidMove: "无效走法",
+
         selectPiece: "请选择一个棋子",
         yourTurn: "你的回合",
         opponentTurn: "对手的回合",
@@ -373,22 +417,6 @@ export class LanguageManager {
     // ========================================
 
     loadSavedLanguage() {
-        try {
-            const saved = this.storage
-                ? this.storage.getItem(STORAGE_KEY)
-                : (
-                    typeof localStorage !== "undefined"
-                        ? localStorage.getItem(STORAGE_KEY)
-                        : null
-                );
-
-            if (saved && TRANSLATIONS[saved]) {
-                return saved;
-            }
-        } catch {
-            // Storage may be unavailable.
-        }
-
         return this.defaultLanguage;
     }
 
@@ -474,22 +502,16 @@ export class LanguageManager {
     // Storage
     // ========================================
 
-    saveLanguage(language) {
+    saveLanguage() {
         try {
             if (this.storage) {
-                this.storage.setItem(
-                    STORAGE_KEY,
-                    language
-                );
+                this.storage.removeItem(LEGACY_STORAGE_KEY);
 
                 return;
             }
 
             if (typeof localStorage !== "undefined") {
-                localStorage.setItem(
-                    STORAGE_KEY,
-                    language
-                );
+                localStorage.removeItem(LEGACY_STORAGE_KEY);
             }
         } catch {
             // Continue without persistence.

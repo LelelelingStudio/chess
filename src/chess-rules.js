@@ -21,6 +21,8 @@
 // Constants
 // ============================================
 
+export const BOARD_SIZE = 8;
+
 export const COLORS = {
     WHITE: "white",
     BLACK: "black"
@@ -828,9 +830,15 @@ function applyMoveToBoard(state, move) {
         next.board[rookFrom] = null;
     }
 
+    const promotionPiece =
+        piece.type === PIECES.PAWN &&
+        (move.to < 8 || move.to > 55)
+            ? move.promotion ?? PIECES.QUEEN
+            : null;
+
     next.board[move.to] = {
         ...piece,
-        type: move.promotion ?? piece.type
+        type: promotionPiece ?? piece.type
     };
 
     return next;
@@ -1084,6 +1092,12 @@ export function makeMove(state, requestedMove) {
 
     const captured = next.board[capturedSquare];
 
+    const promotionPiece =
+        piece.type === PIECES.PAWN &&
+        (move.to < 8 || move.to > 55)
+            ? move.promotion ?? PIECES.QUEEN
+            : null;
+
     // Record the move before changing the board
     next.history.push(getPositionKey(state));
 
@@ -1093,7 +1107,7 @@ export function makeMove(state, requestedMove) {
         piece: piece.type,
         color: piece.color,
         captured: captured?.type ?? null,
-        promotion: move.promotion ?? null,
+        promotion: promotionPiece,
         castling: move.castling ?? null,
         enPassant: Boolean(move.enPassant)
     };
@@ -1124,7 +1138,7 @@ export function makeMove(state, requestedMove) {
 
     next.board[move.to] = {
         ...piece,
-        type: move.promotion ?? piece.type
+        type: promotionPiece ?? piece.type
     };
 
     // Update castling rights

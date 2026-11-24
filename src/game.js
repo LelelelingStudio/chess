@@ -148,7 +148,7 @@ export class ChessGame {
      * Example:
      * game.move(52, 36);
      */
-    move(from, to, promotion = PIECES.QUEEN) {
+    move(from, to, promotion = null) {
         if (this.gameOver) {
             return {
                 success: false,
@@ -218,7 +218,7 @@ export class ChessGame {
      * Example:
      * game.moveNotation("e2", "e4");
      */
-    moveNotation(from, to, promotion = PIECES.QUEEN) {
+    moveNotation(from, to, promotion = null) {
         const fromSquare = notationToSquare(from);
         const toSquare = notationToSquare(to);
 

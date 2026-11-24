@@ -48,6 +48,18 @@ const DIFFICULTIES = {
 
 const MATE_SCORE = 100000;
 
+class SearchCancelledError extends Error {
+    constructor() {
+        super("AI search cancelled");
+    }
+}
+
+function checkCancellation(shouldCancel) {
+    if (shouldCancel?.()) {
+        throw new SearchCancelledError();
+    }
+}
+
 // ============================================
 // Helpers
 // ============================================
@@ -259,8 +271,11 @@ function minimax(
     beta,
     maximizingPlayer,
     rootColor,
-    ply = 0
+    ply = 0,
+    shouldCancel = null
 ) {
+    checkCancellation(shouldCancel);
+
     const status = getGameStatus(state);
 
     if (status.status === "checkmate") {
@@ -308,7 +323,8 @@ function minimax(
                 beta,
                 false,
                 rootColor,
-                ply + 1
+                ply + 1,
+                shouldCancel
             );
 
             bestScore = Math.max(
@@ -340,7 +356,8 @@ function minimax(
             beta,
             true,
             rootColor,
-            ply + 1
+            ply + 1,
+            shouldCancel
         );
 
         bestScore = Math.min(
@@ -396,6 +413,10 @@ export function findBestMove(state, options = {}) {
         return null;
     }
 
+    const shouldCancel = options.shouldCancel ?? null;
+
+    checkCancellation(shouldCancel);
+
     const difficulty = options.difficulty ?? "medium";
 
     const config = DIFFICULTIES[difficulty]
@@ -436,27 +457,38 @@ export function findBestMove(state, options = {}) {
     let bestScore = -Infinity;
     let bestMoves = [];
 
-    for (const move of moves) {
-        const nextState = makeMove(state, move);
+    try {
+        for (const move of moves) {
+            checkCancellation(shouldCancel);
 
-        if (!nextState) continue;
+            const nextState = makeMove(state, move);
 
-        const score = minimax(
-            nextState,
-            depth - 1,
-            -Infinity,
-            Infinity,
-            false,
-            rootColor,
-            1
-        );
+            if (!nextState) continue;
 
-        if (score > bestScore) {
-            bestScore = score;
-            bestMoves = [move];
-        } else if (score === bestScore) {
-            bestMoves.push(move);
+            const score = minimax(
+                nextState,
+                depth - 1,
+                -Infinity,
+                Infinity,
+                false,
+                rootColor,
+                1,
+                shouldCancel
+            );
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestMoves = [move];
+            } else if (score === bestScore) {
+                bestMoves.push(move);
+            }
         }
+    } catch (error) {
+        if (error instanceof SearchCancelledError) {
+            return null;
+        }
+
+        throw error;
     }
 
     return chooseRandomMove(bestMoves);
@@ -509,11 +541,12 @@ export class ChessAI {
         return true;
     }
 
-    getMove(state) {
+    getMove(state, options = {}) {
         return findBestMove(state, {
             difficulty: this.difficulty,
             depth: this.depth,
-            randomness: this.randomness
+            randomness: this.randomness,
+            ...options
         });
     }
 

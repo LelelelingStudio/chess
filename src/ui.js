@@ -6,11 +6,14 @@
  */
 
 import {
+    BOARD_SIZE,
     COLORS,
     PIECES,
     getLegalMoves,
     squareToNotation
 } from "./chess-rules.js";
+
+import { languageManager } from "./language.js";
 
 const PIECE_SYMBOLS = {
     [COLORS.WHITE]: {
@@ -156,15 +159,15 @@ export class ChessUI {
             )
             : -1;
 
-        for (let row = 0; row < 8; row++) {
-            for (let col = 0; col < 8; col++) {
+        for (let row = 0; row < BOARD_SIZE; row++) {
+            for (let col = 0; col < BOARD_SIZE; col++) {
                 const logicalRow =
                     this.orientation === COLORS.BLACK
-                        ? 7 - row
+                        ? BOARD_SIZE - 1 - row
                         : row;
                 const logicalCol =
                     this.orientation === COLORS.BLACK
-                        ? 7 - col
+                        ? BOARD_SIZE - 1 - col
                         : col;
 
                 const squareIndex = logicalRow * 8 + logicalCol;
@@ -217,6 +220,8 @@ export class ChessUI {
                 }
 
                 if (piece) {
+                    square.classList.add("has-piece");
+
                     const pieceElement =
                         document.createElement("span");
 
@@ -280,77 +285,48 @@ export class ChessUI {
         return `${squareName} ${colors[piece.color]} ${names[piece.type]}`;
     }
 
-    t(key) {
-        if (this.language !== "zh") return key;
-
-        const dictionary = {
-            king: "王",
-            queen: "后",
-            rook: "车",
-            bishop: "象",
-            knight: "马",
-            pawn: "兵",
-            white: "白方",
-            black: "黑方"
-        };
-
-        return dictionary[key] ?? key;
+    t(key, replacements = {}) {
+        return languageManager.t(key, replacements);
     }
 
     renderStatus(snapshot) {
         const status = snapshot.status;
+        const sideName = color =>
+            this.t(color === COLORS.WHITE ? "white" : "black");
+
         let text;
 
-        if (this.language === "zh") {
-            if (status.status === "checkmate") {
-                text = status.winner === COLORS.WHITE
-                    ? "白方获胜！将死"
-                    : "黑方获胜！将死";
-            } else if (status.status === "stalemate") {
-                text = "逼和";
-            } else if (status.status === "draw") {
-                text = `和棋（${
-                    status.reason === "fifty-move-rule"
-                        ? "50 步规则"
-                        : status.reason === "threefold-repetition"
-                            ? "三次重复"
-                            : "子力不足"
-                }）`;
-            } else if (snapshot.gameOver && snapshot.result) {
-                text = snapshot.result.status === "resignation"
-                    ? `${snapshot.result.winner === COLORS.WHITE ? "白方" : "黑方"}获胜（认输）`
-                    : "和棋";
-            } else if (status.inCheck) {
-                text = `${snapshot.turn === COLORS.WHITE ? "白方" : "黑方"}被将军`;
-            } else {
-                text = snapshot.turn === COLORS.WHITE
-                    ? "白方回合"
-                    : "黑方回合";
-            }
+        if (status.status === "checkmate") {
+            text = this.t("checkmateStatus", {
+                winner: sideName(status.winner)
+            });
+        } else if (status.status === "stalemate") {
+            text = this.t("stalemateStatus");
+        } else if (status.status === "draw") {
+            const reasonKey =
+                status.reason === "fifty-move-rule"
+                    ? "reasonFifty"
+                    : status.reason === "threefold-repetition"
+                        ? "reasonRepetition"
+                        : "reasonMaterial";
+
+            text = this.t("drawStatus", {
+                reason: this.t(reasonKey)
+            });
+        } else if (snapshot.gameOver && snapshot.result) {
+            text = snapshot.result.status === "resignation"
+                ? this.t("resignStatus", {
+                    winner: sideName(snapshot.result.winner)
+                })
+                : this.t("drawAgreementStatus");
+        } else if (status.inCheck) {
+            text = this.t("inCheckStatus", {
+                side: sideName(snapshot.turn)
+            });
         } else {
-            if (status.status === "checkmate") {
-                text = `${status.winner} wins by checkmate`;
-            } else if (status.status === "stalemate") {
-                text = "Stalemate";
-            } else if (status.status === "draw") {
-                text = `Draw (${
-                    status.reason === "fifty-move-rule"
-                        ? "50-move rule"
-                        : status.reason === "threefold-repetition"
-                            ? "threefold repetition"
-                            : "insufficient material"
-                })`;
-            } else if (snapshot.gameOver && snapshot.result) {
-                text = snapshot.result.status === "resignation"
-                    ? `${snapshot.result.winner} wins by resignation`
-                    : "Draw by agreement";
-            } else if (status.inCheck) {
-                text = `${snapshot.turn} is in check`;
-            } else {
-                text = snapshot.turn === COLORS.WHITE
-                    ? "White to move"
-                    : "Black to move";
-            }
+            text = this.t("turnStatus", {
+                side: sideName(snapshot.turn)
+            });
         }
 
         if (this.statusElement) {
@@ -406,7 +382,7 @@ export class ChessUI {
         // gravestone container; rebuilding here would erase it.
         if (
             this.animations &&
-            this.animations.animations.size > 0
+            this.animations.activeCount > 0
         ) {
             return;
         }
@@ -461,7 +437,11 @@ export class ChessUI {
             Number(square.dataset.row) * 8 +
             Number(square.dataset.col);
 
-        if (!Number.isInteger(index) || index < 0 || index > 63) {
+        if (
+            !Number.isInteger(index) ||
+            index < 0 ||
+            index >= BOARD_SIZE * BOARD_SIZE
+        ) {
             return;
         }
 
@@ -505,8 +485,8 @@ export class ChessUI {
         this.clearSelection();
 
         this.onSquareClick?.({
-            row: Math.floor(index / 8),
-            col: index % 8,
+            row: Math.floor(index / BOARD_SIZE),
+            col: index % BOARD_SIZE,
             square: squareToNotation(index)
         });
     }
@@ -514,7 +494,7 @@ export class ChessUI {
     async playMove(from, move) {
         if (!this.game || !this.isInteractive()) return;
 
-        let promotion = PIECES.QUEEN;
+        let promotion = null;
 
         if (move.promotion) {
             const choice = await this.choosePromotion();
@@ -532,11 +512,11 @@ export class ChessUI {
     }
 
     /** Execute a move supplied by AI or the network. */
-    applyIndices(from, to, promotion = PIECES.QUEEN) {
+    applyIndices(from, to, promotion = null) {
         return this.applyMove(from, to, promotion);
     }
 
-    applyMove(from, to, promotion = PIECES.QUEEN) {
+    applyMove(from, to, promotion = null) {
         if (!this.game) return null;
 
         const fromName = squareToNotation(from);

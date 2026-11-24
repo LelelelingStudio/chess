@@ -77,7 +77,7 @@
   background: rgba(38, 31, 24, 0.28);
 }
 
-.chess-square.is-legal-target:has(.chess-piece)::after {
+.chess-square.is-legal-target.has-piece::after {
   width: 78%;
   border: 5px solid rgba(38, 31, 24, 0.3);
   background: transparent;
@@ -163,7 +163,7 @@
     font-size: clamp(1.45rem, 10vw, 3.7rem);
   }
 
-  .chess-square.is-legal-target:has(.chess-piece)::after {
+  .chess-square.is-legal-target.has-piece::after {
     border-width: 3px;
   }
 
