@@ -385,6 +385,17 @@ export function findBestMove(state, options = {}) {
         return null;
     }
 
+    // Never keep searching a finished game.
+    const status = getGameStatus(state);
+
+    if (
+        status.status === "checkmate" ||
+        status.status === "stalemate" ||
+        status.status === "draw"
+    ) {
+        return null;
+    }
+
     const difficulty = options.difficulty ?? "medium";
 
     const config = DIFFICULTIES[difficulty]

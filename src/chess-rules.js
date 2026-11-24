@@ -1058,11 +1058,14 @@ export function makeMove(state, requestedMove) {
         const requestedPromotion =
             requestedMove.promotion ?? PIECES.QUEEN;
 
+        // A promotion choice only constrains promotion moves;
+        // ordinary moves ignore it. This allows callers to pass a
+        // default promotion value for every move.
         if (candidate.promotion) {
             return candidate.promotion === requestedPromotion;
         }
 
-        return !requestedMove.promotion;
+        return true;
     });
 
     if (!move) {
@@ -1310,4 +1313,147 @@ export function getGameStatus(state) {
         inCheck,
         reason: null
     };
+}
+
+// ============================================
+// Notation helpers
+// ============================================
+
+const SAN_LETTERS = {
+    [PIECES.KING]: "K",
+    [PIECES.QUEEN]: "Q",
+    [PIECES.ROOK]: "R",
+    [PIECES.BISHOP]: "B",
+    [PIECES.KNIGHT]: "N",
+    [PIECES.PAWN]: ""
+};
+
+/**
+ * Build Standard Algebraic Notation for a legal move.
+ * Must be called on the position before the move is played.
+ */
+export function moveToSAN(state, move) {
+    if (!state || !move) return "";
+
+    let san;
+
+    if (move.castling === "kingSide") {
+        san = "O-O";
+    } else if (move.castling === "queenSide") {
+        san = "O-O-O";
+    } else {
+        const piece = state.board[move.from];
+        if (!piece) return "";
+
+        const destination = squareToNotation(move.to);
+        const capture = Boolean(state.board[move.to]) ||
+            Boolean(move.enPassant);
+
+        if (piece.type === PIECES.PAWN) {
+            san = capture
+                ? `${FILES[getFile(move.from)]}x${destination}`
+                : destination;
+        } else {
+            let disambiguation = "";
+
+            const rivals = [];
+            for (let square = 0; square < 64; square++) {
+                if (square === move.from) continue;
+
+                const other = state.board[square];
+                if (
+                    other?.type === piece.type &&
+                    other.color === piece.color &&
+                    getLegalMoves(state, square).some(
+                        candidate => candidate.to === move.to
+                    )
+                ) {
+                    rivals.push(square);
+                }
+            }
+
+            if (rivals.length > 0) {
+                const differentFiles = rivals.every(
+                    square => getFile(square) !== getFile(move.from)
+                );
+
+                const differentRanks = rivals.every(
+                    square => getRow(square) !== getRow(move.from)
+                );
+
+                if (differentFiles) {
+                    disambiguation = FILES[getFile(move.from)];
+                } else if (differentRanks) {
+                    disambiguation = String(8 - getRow(move.from));
+                } else {
+                    disambiguation = squareToNotation(move.from);
+                }
+            }
+
+            san =
+                SAN_LETTERS[piece.type] +
+                disambiguation +
+                (capture ? "x" : "") +
+                destination;
+        }
+
+        if (move.promotion) {
+            san += `=${SAN_LETTERS[move.promotion]}`;
+        }
+    }
+
+    const next = makeMove(state, move);
+
+    if (next) {
+        const status = getGameStatus(next);
+        if (status.status === "checkmate") {
+            san += "#";
+        } else if (status.inCheck) {
+            san += "+";
+        }
+    }
+
+    return san;
+}
+
+/**
+ * Rebuild a state from a list of move records.
+ * Used for online state synchronization: peers exchange moves,
+ * never raw board state, so every move is validated by the
+ * same rules engine before being accepted.
+ */
+export function stateFromMoves(moves = []) {
+    if (!Array.isArray(moves)) return null;
+
+    let state = createInitialState();
+
+    for (const record of moves) {
+        if (!record || typeof record !== "object") {
+            return null;
+        }
+
+        const from = typeof record.from === "string"
+            ? notationToSquare(record.from)
+            : record.from;
+
+        const to = typeof record.to === "string"
+            ? notationToSquare(record.to)
+            : record.to;
+
+        if (!isValidSquare(from) || !isValidSquare(to)) {
+            return null;
+        }
+
+        const next = makeMove(state, {
+            from,
+            to,
+            promotion: record.promotion ?? PIECES.QUEEN
+        });
+
+        if (!next) return null;
+
+        state = next;
+    }
+
+    return state;
 }

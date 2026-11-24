@@ -15,6 +15,36 @@ export const NETWORK_EVENTS = {
     ERROR: "error"
 };
 
+/**
+ * Wait for ICE gathering so the SDP text carries its own
+ * candidates. This makes copy/paste (manual) signaling reliable
+ * without a trickle channel.
+ */
+function waitForIceGathering(peer, timeout = 4000) {
+    if (!peer || peer.iceGatheringState === "complete") {
+        return Promise.resolve();
+    }
+
+    return new Promise(resolve => {
+        const done = () => {
+            clearTimeout(timer);
+            peer.removeEventListener(
+                "icegatheringstatechange",
+                check
+            );
+            resolve();
+        };
+
+        const check = () => {
+            if (peer.iceGatheringState === "complete") done();
+        };
+
+        const timer = setTimeout(done, timeout);
+
+        peer.addEventListener("icegatheringstatechange", check);
+    });
+}
+
 export class ChessNetwork {
     constructor(options = {}) {
         this.peerConnection = null;
@@ -37,6 +67,7 @@ export class ChessNetwork {
         };
 
         this.pendingMessages = [];
+        this.pendingCandidates = [];
     }
 
     // ========================================
@@ -101,6 +132,19 @@ export class ChessNetwork {
             ...metadata,
             roomCode
         };
+
+        if (this.signaling) {
+            const result = await this.signaling.createRoom(
+                roomCode,
+                metadata
+            );
+
+            if (result?.success === false) {
+                throw new Error(
+                    result.error ?? "Room creation failed."
+                );
+            }
+        }
 
         return {
             success: true,
@@ -263,12 +307,14 @@ export class ChessNetwork {
 
         await this.peerConnection.setLocalDescription(offer);
 
+        await waitForIceGathering(this.peerConnection);
+
         await this.sendSignal({
             type: "offer",
             description: this.peerConnection.localDescription
         });
 
-        return offer;
+        return this.peerConnection.localDescription;
     }
 
     async createAnswer() {
@@ -280,12 +326,16 @@ export class ChessNetwork {
 
         await this.peerConnection.setLocalDescription(answer);
 
+        await waitForIceGathering(this.peerConnection);
+
         await this.sendSignal({
             type: "answer",
             description: this.peerConnection.localDescription
         });
 
-        return answer;
+        await this.flushPendingCandidates();
+
+        return this.peerConnection.localDescription;
     }
 
     async handleSignal(signal) {
@@ -332,6 +382,8 @@ export class ChessNetwork {
             description
         );
 
+        await this.flushPendingCandidates();
+
         await this.createAnswer();
     }
 
@@ -345,14 +397,42 @@ export class ChessNetwork {
         await this.peerConnection.setRemoteDescription(
             description
         );
+
+        await this.flushPendingCandidates();
     }
 
     async handleIceCandidate(candidate) {
-        if (!this.peerConnection) {
+        if (!candidate) return;
+
+        if (
+            !this.peerConnection ||
+            !this.peerConnection.remoteDescription
+        ) {
+            this.pendingCandidates.push(candidate);
+
             return;
         }
 
         await this.peerConnection.addIceCandidate(candidate);
+    }
+
+    async flushPendingCandidates() {
+        const candidates = [...this.pendingCandidates];
+
+        this.pendingCandidates = [];
+
+        for (const candidate of candidates) {
+            try {
+                await this.peerConnection?.addIceCandidate(
+                    candidate
+                );
+            } catch (error) {
+                this.emit(NETWORK_EVENTS.ERROR, {
+                    message: "Failed to add ICE candidate.",
+                    error
+                });
+            }
+        }
     }
 
     async sendSignal(signal) {
@@ -392,7 +472,19 @@ export class ChessNetwork {
             };
         }
 
-        throw new Error("Peer is not connected.");
+        // Queue a bounded number of messages while the peer is
+        // still connecting; they are flushed when the channel
+        // opens. This also handles brief reconnections.
+        if (this.pendingMessages.length >= 100) {
+            this.pendingMessages.shift();
+        }
+
+        this.pendingMessages.push(message);
+
+        return {
+            success: true,
+            queued: true
+        };
     }
 
     handleIncomingData(data) {
@@ -535,6 +627,7 @@ export class ChessNetwork {
         this.listeners.clear();
 
         this.pendingMessages = [];
+        this.pendingCandidates = [];
 
         this.roomCode = null;
 
@@ -545,9 +638,122 @@ export class ChessNetwork {
 }
 
 // ============================================
+// Manual signaling adapter
+// ============================================
+
+/**
+ * Pure front-end signaling: the players copy one SDP text to
+ * each other (chat, email, etc.). A four-digit room code alone
+ * CANNOT connect two browsers on the internet; it is only a
+ * human-friendly label for this out-of-band handshake.
+ *
+ * ICE candidates are embedded in the SDP, so no trickle relay
+ * is needed. No server, key or backend is involved.
+ */
+export class ManualSignalingAdapter {
+    constructor() {
+        this.listeners = new Set();
+        this.roomCode = null;
+        this.latestSignal = null;
+    }
+
+    onSignal(callback) {
+        if (typeof callback !== "function") return () => {};
+
+        this.listeners.add(callback);
+
+        return () => this.listeners.delete(callback);
+    }
+
+    async createRoom(roomCode) {
+        this.roomCode = roomCode;
+
+        return { success: true, roomCode };
+    }
+
+    async joinRoom(roomCode) {
+        this.roomCode = roomCode;
+
+        return {
+            success: true,
+            roomCode,
+            requiresOffer: true
+        };
+    }
+
+    async sendSignal(_roomCode, signal) {
+        // Candidates are already inside the SDP text.
+        if (!signal || signal.type === "ice-candidate") return;
+
+        this.latestSignal = {
+            type: signal.type,
+            description: signal.description
+        };
+    }
+
+    receiveSignal(signal) {
+        if (!signal || typeof signal.type !== "string") {
+            throw new Error("Invalid signaling message.");
+        }
+
+        for (const listener of this.listeners) {
+            listener(signal);
+        }
+    }
+
+    getSignalText() {
+        return this.latestSignal
+            ? JSON.stringify(this.latestSignal)
+            : "";
+    }
+
+    setSignalFromText(text) {
+        if (typeof text !== "string" || !text.trim()) {
+            throw new Error("Please paste the signal text.");
+        }
+
+        let signal;
+
+        try {
+            signal = JSON.parse(text.trim());
+        } catch {
+            throw new Error("Signal text is not valid JSON.");
+        }
+
+        if (
+            !signal ||
+            !["offer", "answer"].includes(signal.type) ||
+            typeof signal.description?.sdp !== "string"
+        ) {
+            throw new Error("Unrecognized signal payload.");
+        }
+
+        this.receiveSignal(signal);
+
+        return signal;
+    }
+
+    async reconnect() {
+        return {
+            connected: false,
+            requiresHandshake: true
+        };
+    }
+
+    async leaveRoom() {
+        this.roomCode = null;
+        this.latestSignal = null;
+    }
+}
+
+// ============================================
 // Factory
 // ============================================
 
 export function createChessNetwork(options = {}) {
     return new ChessNetwork(options);
+}
+
+export function createManualSignaling() {
+    return new ManualSignalingAdapter();
 }

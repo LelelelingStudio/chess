@@ -1,94 +1,90 @@
-
 /**
  * Lelele Games - Chess UI
  *
- * Handles board rendering and basic user interactions.
+ * Renders the flat 64-square board produced by chess-rules.js,
+ * handles selection/clicks and drives the animation module.
  */
 
 import {
     COLORS,
-    PIECE_TYPES,
+    PIECES,
     getLegalMoves,
-    getGameStatus,
-    algebraicToPosition,
-    positionToAlgebraic
+    squareToNotation
 } from "./chess-rules.js";
 
 const PIECE_SYMBOLS = {
     [COLORS.WHITE]: {
-        [PIECE_TYPES.KING]: "♔",
-        [PIECE_TYPES.QUEEN]: "♕",
-        [PIECE_TYPES.ROOK]: "♖",
-        [PIECE_TYPES.BISHOP]: "♗",
-        [PIECE_TYPES.KNIGHT]: "♘",
-        [PIECE_TYPES.PAWN]: "♙"
+        [PIECES.KING]: "♔",
+        [PIECES.QUEEN]: "♕",
+        [PIECES.ROOK]: "♖",
+        [PIECES.BISHOP]: "♗",
+        [PIECES.KNIGHT]: "♘",
+        [PIECES.PAWN]: "♙"
     },
     [COLORS.BLACK]: {
-        [PIECE_TYPES.KING]: "♚",
-        [PIECE_TYPES.QUEEN]: "♛",
-        [PIECE_TYPES.ROOK]: "♜",
-        [PIECE_TYPES.BISHOP]: "♝",
-        [PIECE_TYPES.KNIGHT]: "♞",
-        [PIECE_TYPES.PAWN]: "♟"
+        [PIECES.KING]: "♚",
+        [PIECES.QUEEN]: "♛",
+        [PIECES.ROOK]: "♜",
+        [PIECES.BISHOP]: "♝",
+        [PIECES.KNIGHT]: "♞",
+        [PIECES.PAWN]: "♟"
     }
 };
+
+export function getPieceSymbol(color, type) {
+    return PIECE_SYMBOLS[color]?.[type] ?? "";
+}
 
 export class ChessUI {
     constructor(options = {}) {
         this.game = options.game ?? null;
+        this.animations = options.animations ?? null;
 
-        this.boardElement =
-            document.querySelector(
-                options.boardSelector ?? "#chess-board"
-            );
+        this.boardElement = document.querySelector(
+            options.boardSelector ?? "#chessboard"
+        );
 
-        this.statusElement =
-            document.querySelector(
-                options.statusSelector ?? "#game-status"
-            );
+        this.statusElement = document.querySelector(
+            options.statusSelector ?? "#game-status"
+        );
 
-        this.turnElement =
-            document.querySelector(
-                options.turnSelector ?? "#current-turn"
-            );
+        this.turnElement = document.querySelector(
+            options.turnSelector ?? "#current-turn"
+        );
 
-        this.historyElement =
-            document.querySelector(
-                options.historySelector ?? "#move-history"
-            );
+        this.historyElement = document.querySelector(
+            options.historySelector ?? "#move-history"
+        );
 
-        this.capturedElement =
-            document.querySelector(
-                options.capturedSelector ?? "#captured-pieces"
-            );
+        this.capturedWhite = document.querySelector(
+            options.capturedWhiteSelector ?? "#captured-white"
+        );
+
+        this.capturedBlack = document.querySelector(
+            options.capturedBlackSelector ?? "#captured-black"
+        );
 
         this.selectedSquare = null;
-
         this.legalMoves = [];
-
         this.unsubscribe = null;
-
         this.language = "en";
+        this.showCoordinates = true;
+        this.orientation = options.orientation ?? COLORS.WHITE;
 
         this.onPromotion = options.onPromotion ?? null;
-
         this.onMove = options.onMove ?? null;
-
         this.onSquareClick = options.onSquareClick ?? null;
+        this.isInteractive = options.isInteractive ?? (() => true);
+        this.suppressMoveCallback = false;
 
-        this.boundClickHandler =
-            this.handleBoardClick.bind(this);
+        this.boundClickHandler = this.handleBoardClick.bind(this);
 
-        if (this.boardElement) {
-            this.boardElement.addEventListener(
-                "click",
-                this.boundClickHandler
-            );
-        }
+        this.boardElement?.addEventListener(
+            "click",
+            this.boundClickHandler
+        );
 
-        if (this.game) {
-            this.connectGame(this.game);
-        }
+        if (this.game) this.connectGame(this.game);
     }
 
     // ========================================
@@ -96,16 +92,28 @@ export class ChessUI {
     // ========================================
 
     connectGame(game) {
-        if (this.unsubscribe) {
-            this.unsubscribe();
-        }
+        if (this.unsubscribe) this.unsubscribe();
 
         this.game = game;
 
-        this.unsubscribe = game.subscribe(() => {
-            this.render();
-        });
+        this.unsubscribe = game.subscribe(() => this.render());
 
+        this.clearSelection(false);
+        this.render();
+    }
+
+    setAnimations(animations) {
+        this.animations = animations;
+    }
+
+    setOrientation(color) {
+        const orientation =
+            color === COLORS.BLACK ? COLORS.BLACK : COLORS.WHITE;
+
+        if (this.orientation === orientation) return;
+
+        this.orientation = orientation;
+        this.clearSelection(false);
         this.render();
     }
 
@@ -120,19 +128,17 @@ export class ChessUI {
 
         this.renderBoard(snapshot);
         this.renderStatus(snapshot);
-        this.renderHistory(snapshot);
+        this.renderHistory();
         this.renderCaptured(snapshot);
     }
 
     renderBoard(snapshot) {
-        const board = snapshot.board;
+        const board = snapshot.state.board;
 
-        this.boardElement.innerHTML = "";
+        const fragment = document.createDocumentFragment();
 
-        this.boardElement.setAttribute(
-            "role",
-            "grid"
-        );
+        this.boardElement.setAttribute("role", "grid");
+        this.boardElement.dataset.orientation = this.orientation;
 
         this.boardElement.setAttribute(
             "aria-label",
@@ -141,62 +147,73 @@ export class ChessUI {
                 : "Chess board"
         );
 
+        const last = this.game.getLastMove();
+        const inCheckSquare = snapshot.status.inCheck
+            ? this.game.state.board.findIndex(
+                piece =>
+                    piece?.type === PIECES.KING &&
+                    piece.color === snapshot.turn
+            )
+            : -1;
+
         for (let row = 0; row < 8; row++) {
             for (let col = 0; col < 8; col++) {
+                const logicalRow =
+                    this.orientation === COLORS.BLACK
+                        ? 7 - row
+                        : row;
+                const logicalCol =
+                    this.orientation === COLORS.BLACK
+                        ? 7 - col
+                        : col;
+
+                const squareIndex = logicalRow * 8 + logicalCol;
                 const square = document.createElement("button");
-
-                const piece = board[row][col];
-
-                const squareName =
-                    positionToAlgebraic(row, col);
-
-                const isLight =
-                    (row + col) % 2 === 0;
+                const piece = board[squareIndex];
+                const squareName = squareToNotation(squareIndex);
 
                 square.type = "button";
-
                 square.className = [
                     "chess-square",
-                    isLight ? "light" : "dark"
+                    (row + col) % 2 === 0
+                        ? "chess-square--light"
+                        : "chess-square--dark"
                 ].join(" ");
 
-                square.dataset.row = row;
-                square.dataset.col = col;
+                square.dataset.row = String(logicalRow);
+                square.dataset.col = String(logicalCol);
                 square.dataset.square = squareName;
-
-                square.setAttribute(
-                    "role",
-                    "gridcell"
-                );
+                square.setAttribute("role", "gridcell");
 
                 square.setAttribute(
                     "aria-label",
-                    this.getSquareLabel(
-                        squareName,
-                        piece
-                    )
+                    this.getSquareLabel(squareName, piece)
                 );
 
                 if (
-                    this.selectedSquare &&
-                    this.selectedSquare.row === row &&
-                    this.selectedSquare.col === col
+                    this.selectedSquare === squareIndex
                 ) {
-                    square.classList.add("selected");
+                    square.classList.add("is-selected");
                 }
 
-                const isLegalTarget =
-                    this.legalMoves.some(move =>
-                        move.to.row === row &&
-                        move.to.col === col
-                    );
+                if (
+                    last &&
+                    (last.from === squareIndex ||
+                        last.to === squareIndex)
+                ) {
+                    square.classList.add("is-last-move");
+                }
 
-                if (isLegalTarget) {
-                    square.classList.add("legal-target");
+                if (squareIndex === inCheckSquare) {
+                    square.classList.add("is-in-check");
+                }
 
-                    if (piece) {
-                        square.classList.add("capture-target");
-                    }
+                if (
+                    this.legalMoves.some(
+                        move => move.to === squareIndex
+                    )
+                ) {
+                    square.classList.add("is-legal-target");
                 }
 
                 if (piece) {
@@ -204,10 +221,12 @@ export class ChessUI {
                         document.createElement("span");
 
                     pieceElement.className =
-                        `chess-piece ${piece.color}`;
+                        `chess-piece chess-piece--${piece.color}`;
 
-                    pieceElement.textContent =
-                        PIECE_SYMBOLS[piece.color]?.[piece.type] ?? "";
+                    pieceElement.textContent = getPieceSymbol(
+                        piece.color,
+                        piece.type
+                    );
 
                     pieceElement.setAttribute(
                         "aria-hidden",
@@ -217,128 +236,251 @@ export class ChessUI {
                     square.appendChild(pieceElement);
                 }
 
-                this.boardElement.appendChild(square);
+                if (this.showCoordinates) {
+                    if (col === 0) {
+                        const label = document.createElement("span");
+                        label.className = "board-coordinate";
+                        label.textContent = String(8 - logicalRow);
+                        square.appendChild(label);
+                    }
+
+                    if (row === 7) {
+                        const label = document.createElement("span");
+                        label.className =
+                            "board-coordinate board-coordinate--file";
+                        label.textContent = "abcdefgh"[logicalCol];
+                        square.appendChild(label);
+                    }
+                }
+
+                fragment.appendChild(square);
+            }
+        }
+
+        this.boardElement.replaceChildren(fragment);
+    }
+
+    getSquareLabel(squareName, piece) {
+        const names = {
+            king: this.t("king"),
+            queen: this.t("queen"),
+            rook: this.t("rook"),
+            bishop: this.t("bishop"),
+            knight: this.t("knight"),
+            pawn: this.t("pawn")
+        };
+
+        const colors = {
+            white: this.t("white"),
+            black: this.t("black")
+        };
+
+        if (!piece) return squareName;
+
+        return `${squareName} ${colors[piece.color]} ${names[piece.type]}`;
+    }
+
+    t(key) {
+        if (this.language !== "zh") return key;
+
+        const dictionary = {
+            king: "王",
+            queen: "后",
+            rook: "车",
+            bishop: "象",
+            knight: "马",
+            pawn: "兵",
+            white: "白方",
+            black: "黑方"
+        };
+
+        return dictionary[key] ?? key;
+    }
+
+    renderStatus(snapshot) {
+        const status = snapshot.status;
+        let text;
+
+        if (this.language === "zh") {
+            if (status.status === "checkmate") {
+                text = status.winner === COLORS.WHITE
+                    ? "白方获胜！将死"
+                    : "黑方获胜！将死";
+            } else if (status.status === "stalemate") {
+                text = "逼和";
+            } else if (status.status === "draw") {
+                text = `和棋（${
+                    status.reason === "fifty-move-rule"
+                        ? "50 步规则"
+                        : status.reason === "threefold-repetition"
+                            ? "三次重复"
+                            : "子力不足"
+                }）`;
+            } else if (snapshot.gameOver && snapshot.result) {
+                text = snapshot.result.status === "resignation"
+                    ? `${snapshot.result.winner === COLORS.WHITE ? "白方" : "黑方"}获胜（认输）`
+                    : "和棋";
+            } else if (status.inCheck) {
+                text = `${snapshot.turn === COLORS.WHITE ? "白方" : "黑方"}被将军`;
+            } else {
+                text = snapshot.turn === COLORS.WHITE
+                    ? "白方回合"
+                    : "黑方回合";
+            }
+        } else {
+            if (status.status === "checkmate") {
+                text = `${status.winner} wins by checkmate`;
+            } else if (status.status === "stalemate") {
+                text = "Stalemate";
+            } else if (status.status === "draw") {
+                text = `Draw (${
+                    status.reason === "fifty-move-rule"
+                        ? "50-move rule"
+                        : status.reason === "threefold-repetition"
+                            ? "threefold repetition"
+                            : "insufficient material"
+                })`;
+            } else if (snapshot.gameOver && snapshot.result) {
+                text = snapshot.result.status === "resignation"
+                    ? `${snapshot.result.winner} wins by resignation`
+                    : "Draw by agreement";
+            } else if (status.inCheck) {
+                text = `${snapshot.turn} is in check`;
+            } else {
+                text = snapshot.turn === COLORS.WHITE
+                    ? "White to move"
+                    : "Black to move";
+            }
+        }
+
+        if (this.statusElement) {
+            this.statusElement.textContent = text;
+            this.statusElement.dataset.state =
+                status.status === "playing"
+                    ? "playing"
+                    : status.status;
+        }
+
+        if (this.turnElement) {
+            this.turnElement.textContent =
+                snapshot.turn === COLORS.WHITE
+                    ? this.t("white")
+                    : this.t("black");
+        }
+    }
+
+    renderHistory() {
+        if (!this.historyElement || !this.game) return;
+
+        this.historyElement.innerHTML = "";
+
+        for (const move of this.game.getMoveHistory()) {
+            const item = document.createElement("div");
+
+            item.className = "move-history-item";
+
+            item.textContent =
+                `${move.number}${move.color === COLORS.WHITE ? "." : "..."} ${move.notation ?? ""}`;
+
+            this.historyElement.appendChild(item);
+        }
+    }
+
+    renderCaptured(snapshot) {
+        if (!this.capturedWhite || !this.capturedBlack) return;
+
+        const captured = this.game.getCapturedPieces();
+
+        const expected =
+            captured.white.length + captured.black.length;
+
+        const existing =
+            this.capturedWhite.querySelectorAll(
+                ".chess-gravestone"
+            ).length +
+            this.capturedBlack.querySelectorAll(
+                ".chess-gravestone"
+            ).length;
+
+        // During a capture the animation module owns the
+        // gravestone container; rebuilding here would erase it.
+        if (
+            this.animations &&
+            this.animations.animations.size > 0
+        ) {
+            return;
+        }
+
+        if (existing === expected) return;
+
+        this.syncCaptured(snapshot);
+    }
+
+    syncCaptured(snapshot = null) {
+        if (!this.capturedWhite || !this.capturedBlack || !this.game) {
+            return;
+        }
+
+        const state = snapshot ?? this.game.getSnapshot();
+        const captured = this.game.getCapturedPieces();
+
+        for (const [container, list] of [
+            [this.capturedWhite, captured.white],
+            [this.capturedBlack, captured.black]
+        ]) {
+            container.innerHTML = "";
+
+            for (const piece of list) {
+                const item = document.createElement("span");
+
+                item.className = "chess-gravestone gravestone-settled";
+
+                const icon = document.createElement("span");
+                icon.className = "gravestone-piece";
+                icon.textContent = getPieceSymbol(
+                    piece.color,
+                    piece.type
+                );
+
+                item.appendChild(icon);
+                container.appendChild(item);
             }
         }
     }
 
     // ========================================
-    // Game status
-    // ========================================
-
-    renderStatus(snapshot) {
-        const status = getGameStatus(
-            snapshot.board,
-            snapshot.turn,
-            snapshot.castlingRights,
-            snapshot.enPassantTarget,
-            snapshot.halfmoveClock
-        );
-
-        if (this.turnElement) {
-            this.turnElement.textContent =
-                this.translate(
-                    snapshot.turn === COLORS.WHITE
-                        ? "White's turn"
-                        : "Black's turn"
-                );
-        }
-
-        if (this.statusElement) {
-            this.statusElement.textContent =
-                this.translate(status.message ?? status.type ?? "");
-        }
-    }
-
-    // ========================================
-    // Move history
-    // ========================================
-
-    renderHistory(snapshot) {
-        if (!this.historyElement) return;
-
-        this.historyElement.innerHTML = "";
-
-        const history = snapshot.history ?? [];
-
-        history.forEach((move, index) => {
-            const item = document.createElement("div");
-
-            item.className = "move-history-item";
-
-            const number = Math.floor(index / 2) + 1;
-
-            item.textContent =
-                `${number}${index % 2 === 0 ? "." : "..."} ${move.notation ?? ""}`;
-
-            this.historyElement.appendChild(item);
-        });
-    }
-
-    // ========================================
-    // Captured pieces
-    // ========================================
-
-    renderCaptured(snapshot) {
-        if (!this.capturedElement) return;
-
-        this.capturedElement.innerHTML = "";
-
-        const captured = snapshot.captured ?? [];
-
-        for (const piece of captured) {
-            const item = document.createElement("span");
-
-            item.className =
-                `captured-piece ${piece.color}`;
-
-            item.textContent =
-                PIECE_SYMBOLS[piece.color]?.[piece.type] ?? "";
-
-            item.title = this.translate(
-                `${piece.color} ${piece.type}`
-            );
-
-            this.capturedElement.appendChild(item);
-        }
-    }
-
-    // ========================================
-    // Board interactions
+    // Interaction
     // ========================================
 
     handleBoardClick(event) {
-        const square = event.target.closest(
-            ".chess-square"
-        );
+        const square = event.target.closest(".chess-square");
 
-        if (!square || !this.boardElement.contains(square)) {
+        if (!square || !this.boardElement.contains(square)) return;
+
+        const index =
+            Number(square.dataset.row) * 8 +
+            Number(square.dataset.col);
+
+        if (!Number.isInteger(index) || index < 0 || index > 63) {
             return;
         }
 
-        const row = Number(square.dataset.row);
-        const col = Number(square.dataset.col);
-
-        if (!Number.isInteger(row) || !Number.isInteger(col)) {
-            return;
-        }
-
-        this.selectSquare(row, col);
+        this.selectSquare(index);
     }
 
-    selectSquare(row, col) {
-        if (!this.game) return;
+    selectSquare(index) {
+        if (!this.game || !this.isInteractive()) return;
 
-        const snapshot = this.game.getSnapshot();
+        const dialog = document.querySelector("#dialog-backdrop");
 
-        const piece = snapshot.board[row][col];
+        if (dialog && !dialog.hidden) return;
 
-        if (this.selectedSquare) {
-            const selectedMove =
-                this.legalMoves.find(move =>
-                    move.to.row === row &&
-                    move.to.col === col
-                );
+        const state = this.game.getSnapshot().state;
+
+        if (this.selectedSquare !== null) {
+            const selectedMove = this.legalMoves.find(
+                move => move.to === index
+            );
 
             if (selectedMove) {
                 this.playMove(
@@ -350,18 +492,11 @@ export class ChessUI {
             }
         }
 
-        if (piece && piece.color === snapshot.turn) {
-            this.selectedSquare = { row, col };
+        const piece = state.board[index];
 
-            this.legalMoves = getLegalMoves(
-                snapshot.board,
-                row,
-                col,
-                snapshot.turn,
-                snapshot.castlingRights,
-                snapshot.enPassantTarget
-            );
-
+        if (piece && piece.color === state.turn) {
+            this.selectedSquare = index;
+            this.legalMoves = getLegalMoves(state, index);
             this.render();
 
             return;
@@ -369,102 +504,121 @@ export class ChessUI {
 
         this.clearSelection();
 
-        if (this.onSquareClick) {
-            this.onSquareClick({ row, col });
-        }
+        this.onSquareClick?.({
+            row: Math.floor(index / 8),
+            col: index % 8,
+            square: squareToNotation(index)
+        });
     }
 
-    // ========================================
-    // Execute move
-    // ========================================
-
     async playMove(from, move) {
-        if (!this.game) return;
+        if (!this.game || !this.isInteractive()) return;
 
-        let promotion = "queen";
+        let promotion = PIECES.QUEEN;
 
         if (move.promotion) {
-            promotion = await this.choosePromotion();
+            const choice = await this.choosePromotion();
+
+            if (!choice) {
+                this.clearSelection();
+
+                return;
+            }
+
+            promotion = choice;
         }
 
-        const result = this.game.move(
-            from,
-            move.to,
-            promotion
-        );
+        return this.applyMove(from, move.to, promotion);
+    }
 
-        this.clearSelection();
+    /** Execute a move supplied by AI or the network. */
+    applyIndices(from, to, promotion = PIECES.QUEEN) {
+        return this.applyMove(from, to, promotion);
+    }
+
+    applyMove(from, to, promotion = PIECES.QUEEN) {
+        if (!this.game) return null;
+
+        const fromName = squareToNotation(from);
+        const toName = squareToNotation(to);
+
+        const capturedPiece = this.game.getPiece(to);
+        const capturedSymbol = capturedPiece
+            ? getPieceSymbol(
+                capturedPiece.color,
+                capturedPiece.type
+            )
+            : "";
+
+        if (this.animations && this.animations.duration > 0) {
+            this.animations.movePiece(fromName, toName);
+
+            if (
+                capturedPiece ||
+                this.game.getPiece(from)?.type === PIECES.PAWN &&
+                    to % 8 !== from % 8
+            ) {
+                this.animations.capturePiece(toName, {
+                    symbol: capturedSymbol || "♟",
+                    name: capturedPiece?.type ?? "pawn",
+                    color: capturedPiece?.color ??
+                        (this.game.state.turn === COLORS.WHITE
+                            ? COLORS.BLACK
+                            : COLORS.WHITE)
+                });
+            }
+        }
+
+        const result = this.game.move(from, to, promotion);
+
+        this.clearSelection(false);
 
         if (!result?.success) {
+            this.animations?.cancelAll();
             this.render();
-            return;
+
+            return result;
         }
 
-        if (this.onMove) {
-            this.onMove({
-                from,
-                to: move.to,
-                promotion
+        if (!this.suppressMoveCallback) {
+            this.onMove?.({
+                from: fromName,
+                to: toName,
+                fromIndex: from,
+                toIndex: to,
+                promotion,
+                captured: Boolean(capturedPiece)
             });
         }
 
-        this.render();
+        return result;
     }
 
     choosePromotion() {
-        if (this.onPromotion) {
-            return this.onPromotion();
-        }
+        if (this.onPromotion) return this.onPromotion();
 
-        return Promise.resolve("queen");
+        return Promise.resolve(PIECES.QUEEN);
     }
 
-    // ========================================
-    // Selection
-    // ========================================
-
-    clearSelection() {
+    clearSelection(render = true) {
         this.selectedSquare = null;
-
         this.legalMoves = [];
 
-        this.render();
+        if (render) this.render();
     }
 
     // ========================================
-    // Language
+    // Settings and language
     // ========================================
 
     setLanguage(language) {
-        this.language =
-            language === "zh" ? "zh" : "en";
-
+        this.language = language === "zh" ? "zh" : "en";
         this.render();
     }
 
-    translate(text) {
-        if (this.language !== "zh") {
-            return text;
-        }
-
-        const dictionary = {
-            "White's turn": "白方回合",
-            "Black's turn": "黑方回合",
-            "Check": "将军",
-            "Checkmate": "将死",
-            "Stalemate": "逼和",
-            "Draw": "平局",
-            "White": "白方",
-            "Black": "黑方",
-            "king": "王",
-            "queen": "后",
-            "rook": "车",
-            "bishop": "象",
-            "knight": "马",
-            "pawn": "兵"
-        };
-
-        return dictionary[text] ?? text;
+    setCoordinates(visible) {
+        this.showCoordinates = Boolean(visible);
+        this.render();
     }
 
     // ========================================
@@ -477,21 +631,15 @@ export class ChessUI {
             this.unsubscribe = null;
         }
 
-        if (this.boardElement) {
-            this.boardElement.removeEventListener(
-                "click",
-                this.boundClickHandler
-            );
-        }
+        this.boardElement?.removeEventListener(
+            "click",
+            this.boundClickHandler
+        );
 
         this.selectedSquare = null;
         this.legalMoves = [];
     }
 }
-
-// ============================================
-// Factory
-// ============================================
 
 export function createChessUI(options = {}) {
     return new ChessUI(options);

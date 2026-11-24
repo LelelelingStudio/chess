@@ -27,6 +27,9 @@ export const ONLINE_EVENTS = {
     RESIGN: "resign",
     GAME_RESTART: "game-restart",
     CONNECTION_CHANGE: "connection-change",
+    STATE_SYNC: "state-sync",
+    SYNC_REQUEST: "sync-request",
+    REQUEST_TIMEOUT: "request-timeout",
     ERROR: "error"
 };
 
@@ -81,6 +84,8 @@ function oppositeColor(color) {
 export class OnlineGame {
     constructor(options = {}) {
         this.network = options.network ?? null;
+
+        this.getState = options.getState ?? null;
 
         this.playerName = options.playerName ?? "Player";
 
@@ -160,7 +165,17 @@ export class OnlineGame {
         });
 
         this.network.on("connection-change", status => {
+            const wasConnected = this.connected;
+
             this.connected = status.connected;
+
+            if (status.connected && !wasConnected) {
+                this.handleConnected();
+            }
+
+            if (!status.connected && wasConnected) {
+                this.roomState = "reconnecting";
+            }
 
             this.emit(
                 ONLINE_EVENTS.CONNECTION_CHANGE,
@@ -220,7 +235,9 @@ export class OnlineGame {
 
             this.roomState = "waiting";
 
-            this.connected = true;
+            // A room code is not a network connection. The
+            // data channel opening triggers handleConnected().
+            this.connected = false;
 
             this.emit(ONLINE_EVENTS.ROOM_CREATED, {
                 roomCode,
@@ -281,16 +298,19 @@ export class OnlineGame {
 
             this.opponent = result.host ?? null;
 
-            this.roomState = "playing";
+            // The peer connection is not established by the room
+            // code alone. Wait for the WebRTC data channel.
+            this.roomState = "connecting";
 
-            this.connected = true;
+            this.connected = false;
 
-            this.gameStarted = true;
+            this.gameStarted = false;
 
             this.emit(ONLINE_EVENTS.ROOM_JOINED, {
                 roomCode,
                 color: this.localColor,
-                opponent: this.opponent
+                opponent: this.opponent,
+                requiresHandshake: true
             });
 
             return {
@@ -310,6 +330,63 @@ export class OnlineGame {
     // ========================================
     // Player information
     // ========================================
+
+    /**
+     * Runs once the WebRTC data channel opens. The host
+     * introduces itself and pushes the authoritative position;
+     * the guest asks for a fresh sync after reconnecting.
+     */
+    async handleConnected() {
+        this.roomState = "playing";
+        this.gameStarted = true;
+
+        if (this.isHost) {
+            await this.send({
+                type: ONLINE_EVENTS.PLAYER_JOINED,
+                player: {
+                    id: this.playerId,
+                    name: this.playerName,
+                    color: COLORS.WHITE
+                }
+            });
+
+            this.sendState(this.getState?.() ?? []);
+        } else {
+            this.send({
+                type: ONLINE_EVENTS.SYNC_REQUEST,
+                playerId: this.playerId,
+                player: {
+                    id: this.playerId,
+                    name: this.playerName,
+                    color: this.localColor
+                }
+            });
+        }
+    }
+
+    /** Ask the host for the current move list. */
+    requestSync() {
+        return this.send({
+            type: ONLINE_EVENTS.SYNC_REQUEST,
+            playerId: this.playerId,
+            player: {
+                id: this.playerId,
+                name: this.playerName,
+                color: this.localColor
+            }
+        });
+    }
+
+    /** Host-only: publish the authoritative move list. */
+    sendState(moves) {
+        if (!this.isHost) return Promise.resolve(false);
+
+        return this.send({
+            type: ONLINE_EVENTS.STATE_SYNC,
+            moves,
+            playerId: this.playerId
+        });
+    }
 
     setOpponent(player) {
         this.opponent = {
@@ -457,12 +534,29 @@ export class OnlineGame {
             timestamp: Date.now()
         };
 
+        const result = await this.send(message);
+
+        if (!result.success) return result;
+
         this.pendingRequests.set(requestId, {
             type,
             createdAt: Date.now()
         });
 
-        return this.send(message);
+        const timer = setTimeout(() => {
+            if (!this.pendingRequests.has(requestId)) return;
+
+            this.clearRequest(requestId);
+
+            this.emit(ONLINE_EVENTS.REQUEST_TIMEOUT, {
+                requestId,
+                type
+            });
+        }, REQUEST_TIMEOUT);
+
+        this.requestTimers.set(requestId, timer);
+
+        return result;
     }
 
     clearRequest(requestId) {
@@ -486,6 +580,14 @@ export class OnlineGame {
         }
 
         if (message.playerId === this.playerId) {
+            return;
+        }
+
+        // A player must never receive a move attributed to itself.
+        if (
+            message.type === ONLINE_EVENTS.MOVE &&
+            message.color === this.localColor
+        ) {
             return;
         }
 
@@ -538,6 +640,35 @@ export class OnlineGame {
                 this.emit(ONLINE_EVENTS.GAME_RESTART, message);
                 break;
 
+            case ONLINE_EVENTS.SYNC_REQUEST:
+                if (this.isHost) {
+                    if (
+                        message.player &&
+                        typeof message.player === "object"
+                    ) {
+                        this.setOpponent(message.player);
+                    }
+
+                    this.sendState(this.getState?.() ?? []);
+                }
+
+                break;
+
+            case ONLINE_EVENTS.STATE_SYNC:
+                if (
+                    this.isHost ||
+                    !Array.isArray(message.moves) ||
+                    message.moves.length > 500
+                ) {
+                    break;
+                }
+
+                this.emit(ONLINE_EVENTS.STATE_SYNC, {
+                    moves: message.moves
+                });
+
+                break;
+
             default:
                 this.emit("unknown-message", message);
         }
@@ -548,7 +679,12 @@ export class OnlineGame {
             message.requestId
         );
 
-        if (!request) return;
+        const expectedType =
+            eventType === ONLINE_EVENTS.UNDO_RESPONSE
+                ? ONLINE_EVENTS.UNDO_REQUEST
+                : ONLINE_EVENTS.DRAW_REQUEST;
+
+        if (!request || request.type !== expectedType) return;
 
         this.clearRequest(message.requestId);
 

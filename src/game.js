@@ -19,7 +19,9 @@ import {
     isInCheck,
     squareToNotation,
     notationToSquare,
-    toFEN
+    toFEN,
+    moveToSAN,
+    stateFromMoves
 } from "./chess-rules.js";
 
 // ============================================
@@ -84,6 +86,7 @@ export class ChessGame {
             state: cloneState(this.state),
 
             currentTurn: this.state.turn,
+            turn: this.state.turn,
 
             status: getGameStatus(this.state),
 
@@ -423,27 +426,107 @@ export class ChessGame {
     // ========================================
 
     getMoveHistory() {
+        let replayState = createInitialState();
+
         return this.state.moveHistory.map(
-            (move, index) => ({
-                number: Math.floor(index / 2) + 1,
+            (move, index) => {
+                const notation = moveToSAN(replayState, move);
 
-                color: move.color,
+                replayState = makeMove(replayState, move)
+                    ?? replayState;
 
-                piece: move.piece,
+                return {
+                    number: Math.floor(index / 2) + 1,
 
-                from: squareToNotation(move.from),
+                    color: move.color,
 
-                to: squareToNotation(move.to),
+                    piece: move.piece,
 
-                captured: move.captured,
+                    from: squareToNotation(move.from),
 
-                promotion: move.promotion,
+                    to: squareToNotation(move.to),
 
-                castling: move.castling,
+                    notation,
 
-                enPassant: move.enPassant
-            })
+                    captured: move.captured,
+
+                    promotion: move.promotion,
+
+                    castling: move.castling,
+
+                    enPassant: move.enPassant
+                };
+            }
         );
+    }
+
+    /**
+     * Pieces removed from the board, grouped by the color that
+     * lost them. Used by the captured-piece area.
+     */
+    getCapturedPieces() {
+        const captured = { white: [], black: [] };
+
+        for (const move of this.state.moveHistory) {
+            if (!move.captured) continue;
+
+            const loser =
+                move.color === COLORS.WHITE
+                    ? COLORS.BLACK
+                    : COLORS.WHITE;
+
+            captured[loser].push({
+                type: move.captured,
+                color: loser,
+                square: move.enPassant
+                    ? move.to + (
+                        move.color === COLORS.WHITE ? 8 : -8
+                    )
+                    : move.to
+            });
+        }
+
+        return captured;
+    }
+
+    /**
+     * Replace the current position with one rebuilt from a
+     * verified move list. Used by online state synchronization.
+     */
+    loadFromMoves(moves) {
+        const restored = stateFromMoves(moves);
+
+        if (!restored) {
+            return {
+                success: false,
+                reason: "invalid-move-list"
+            };
+        }
+
+        this.state = restored;
+        this.undoStack = [];
+        this.redoStack = [];
+        this.gameOver = false;
+        this.result = null;
+        this.startedAt = Date.now();
+        this.endedAt = null;
+
+        const status = getGameStatus(this.state);
+
+        if (
+            status.status === "checkmate" ||
+            status.status === "stalemate" ||
+            status.status === "draw"
+        ) {
+            this.finish(status);
+        }
+
+        this.emit("load");
+
+        return {
+            success: true,
+            snapshot: this.getSnapshot()
+        };
     }
 
     clearHistory() {

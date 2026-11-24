@@ -30,7 +30,8 @@ export const DEFAULT_SETTINGS = {
     showCoordinates: true,
     boardTheme: "classic",
     pieceTheme: "classic",
-    autoQueenPromotion: true
+    autoQueenPromotion: true,
+    difficulty: "medium"
 };
 
 export const DEFAULT_STATISTICS = {
@@ -176,7 +177,7 @@ export class ChessStorage {
             {}
         );
 
-        return {
+        const settings = {
             ...DEFAULT_SETTINGS,
             ...(
                 saved &&
@@ -186,6 +187,16 @@ export class ChessStorage {
                     : {}
             )
         };
+
+        if (!["easy", "medium", "hard"].includes(settings.difficulty)) {
+            settings.difficulty = DEFAULT_SETTINGS.difficulty;
+        }
+
+        if (!["en", "zh"].includes(settings.language)) {
+            settings.language = DEFAULT_SETTINGS.language;
+        }
+
+        return settings;
     }
 
     saveSettings(settings) {
@@ -470,12 +481,15 @@ export class ChessStorage {
             return false;
         }
 
+        let imported = true;
+
         if (
             data.settings &&
             typeof data.settings === "object" &&
             !Array.isArray(data.settings)
         ) {
-            this.saveSettings(data.settings);
+            imported =
+                this.saveSettings(data.settings) && imported;
         }
 
         if (
@@ -483,29 +497,32 @@ export class ChessStorage {
             typeof data.statistics === "object" &&
             !Array.isArray(data.statistics)
         ) {
-            this.saveStatistics(data.statistics);
+            imported =
+                this.saveStatistics(data.statistics) && imported;
         }
 
         if (Array.isArray(data.matches)) {
-            this.set(
-                STORAGE_KEYS.MATCHES,
-                data.matches.slice(0, MAX_MATCH_RECORDS)
-            );
+            imported =
+                this.set(
+                    STORAGE_KEYS.MATCHES,
+                    data.matches.slice(0, MAX_MATCH_RECORDS)
+                ) && imported;
         }
 
         if (
             data.savedGame &&
             typeof data.savedGame === "object"
         ) {
-            this.saveGame(data.savedGame);
+            imported = this.saveGame(data.savedGame) && imported;
         }
 
-        return true;
+        return imported;
     }
 
     // ========================================
     // Clear data
     // ========================================
+
 
     clearAll() {
         if (!this.available || !this.storage) {
@@ -526,6 +543,12 @@ export class ChessStorage {
                 ) {
                     this.storage.removeItem(key);
                 }
+            }
+
+            try {
+                this.storage.removeItem("lelele-chess-language");
+            } catch {
+                // Already removed or inaccessible.
             }
 
             return true;

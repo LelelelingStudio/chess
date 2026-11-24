@@ -318,6 +318,152 @@ svg {
   }
 }
 
+/* Game layout */
+.game-screen {
+  display: grid;
+  width: min(100%, 1080px);
+  gap: 18px;
+  justify-items: center;
+}
+
+.players-row {
+  display: grid;
+  width: min(100%, 760px);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.board-sidebar {
+  width: min(100%, 620px);
+  padding: 14px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  background: var(--color-surface);
+}
+
+.sidebar-title {
+  margin: 0 0 10px;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.move-history {
+  display: flex;
+  max-height: 108px;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  overflow-y: auto;
+  color: var(--color-text);
+  font-size: 0.85rem;
+}
+
+.move-history-item {
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-panel,
+.online-panel {
+  width: min(100%, 620px);
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  background: var(--color-surface);
+}
+
+.ai-panel {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.ai-panel .form-select {
+  max-width: 180px;
+}
+
+.online-topbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.online-lobby,
+.join-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.join-row .form-input {
+  flex: 1 1 140px;
+}
+
+.signaling-box {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border);
+}
+
+.signaling-box .dialog-copy {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.signaling-box textarea {
+  resize: vertical;
+  font-size: 0.78rem;
+}
+
+.promotion-options {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.promotion-options button {
+  min-height: 64px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-page-soft);
+  color: var(--color-text);
+  font-size: 1.5rem;
+  cursor: pointer;
+}
+
+.promotion-options button span {
+  display: block;
+  font-size: 0.7rem;
+}
+
+.settings-list {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+@media (max-width: 700px) {
+  .players-row {
+    grid-template-columns: 1fr;
+  }
+
+  .game-screen {
+    gap: 12px;
+  }
+
+  .board-sidebar {
+    padding: 12px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -47,11 +47,14 @@ export class ChessAnimations {
     constructor(options = {}) {
         this.boardElement =
             options.boardElement ??
-            document.querySelector("#chess-board");
+            document.querySelector("#chessboard");
 
         this.gravestoneContainer =
             options.gravestoneContainer ??
             document.querySelector("#captured-pieces");
+
+        this.gravestoneContainers =
+            options.gravestoneContainers ?? null;
 
         this.duration =
             options.duration ?? DEFAULT_DURATION;
@@ -96,8 +99,8 @@ export class ChessAnimations {
 
         Object.assign(clone.style, {
             position: "fixed",
-            left: `${start.x - 24}px`,
-            top: `${start.y - 24}px`,
+            left: `${start.x - source.clientWidth / 2}px`,
+            top: `${start.y - source.clientHeight / 2}px`,
             width: `${source.clientWidth}px`,
             height: `${source.clientHeight}px`,
             zIndex: "1000",
@@ -166,8 +169,8 @@ export class ChessAnimations {
 
         Object.assign(clone.style, {
             position: "fixed",
-            left: `${center.x - 24}px`,
-            top: `${center.y - 24}px`,
+            left: `${center.x - square.clientWidth / 2}px`,
+            top: `${center.y - square.clientHeight / 2}px`,
             width: `${square.clientWidth}px`,
             height: `${square.clientHeight}px`,
             zIndex: "1001",
@@ -233,7 +236,11 @@ export class ChessAnimations {
     // ========================================
 
     async createGravestone(position, pieceInfo = {}) {
-        if (this.destroyed || !this.gravestoneContainer) {
+        const container =
+            this.gravestoneContainers?.[pieceInfo.color] ??
+            this.gravestoneContainer;
+
+        if (this.destroyed || !container) {
             return null;
         }
 
@@ -269,7 +276,7 @@ export class ChessAnimations {
                 : "Captured chess piece"
         );
 
-        this.gravestoneContainer.appendChild(gravestone);
+        container.appendChild(gravestone);
 
         gravestone.animate(
             [
@@ -366,11 +373,11 @@ export class ChessAnimations {
 
         if (!square) return false;
 
-        square.classList.add("square-highlight");
+        square.classList.add("is-move-feedback");
 
         await wait(500);
 
-        square.classList.remove("square-highlight");
+        square.classList.remove("is-move-feedback");
 
         return true;
     }
@@ -380,7 +387,7 @@ export class ChessAnimations {
 
         if (!square) return false;
 
-        square.classList.add("king-in-check");
+        square.classList.add("is-in-check");
 
         return true;
     }
@@ -389,9 +396,9 @@ export class ChessAnimations {
         if (!this.boardElement) return;
 
         this.boardElement
-            .querySelectorAll(".king-in-check")
+            .querySelectorAll(".is-in-check")
             .forEach(element => {
-                element.classList.remove("king-in-check");
+                element.classList.remove("is-in-check");
             });
     }
 
@@ -448,11 +455,9 @@ export class ChessAnimations {
 
         this.animations.clear();
 
-        if (this.boardElement) {
-            this.boardElement
-                .querySelectorAll(".piece-moving, .piece-capturing")
-                .forEach(element => element.remove());
-        }
+        document
+            .querySelectorAll(".piece-moving, .piece-capturing")
+            .forEach(element => element.remove());
     }
 
     destroy() {
