@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#17130f">
+  <meta
+    name="description"
+    content="A cozy, modern chess game with local, computer, and online play."
+  >
+  <title>Chess — Lelele Games</title>
+  <link rel="stylesheet" href="./styles/main.css">
+  <link rel="stylesheet" href="./styles/board.css">
+  <link rel="stylesheet" href="./styles/components.css">
+  <link rel="stylesheet" href="./styles/animations.css">
+</head>
+<body>
+  <div id="app" class="app">
+    <header class="app-header">
+      <a class="brand" href="./" aria-label="Chess home">CHESS</a>
+      <div class="header-actions">
+        <button id="language-toggle" class="icon-button" type="button" aria-label="Switch language">
+          中文
+        </button>
+        <button id="settings-button" class="icon-button" type="button" aria-label="Settings">
+          Settings
+        </button>
+      </div>
+    </header>
+
+    <main id="main-content" class="main-content">
+      <section class="welcome-panel" aria-labelledby="game-title">
+        <p class="eyebrow">LELELE GAMES</p>
+        <h1 id="game-title">A game of chess.</h1>
+        <p class="welcome-copy">A quiet place to think, plan, and play.</p>
+
+        <div class="mode-actions" aria-label="Choose a game mode">
+          <button class="mode-button" type="button" data-mode="local">
+            <span class="mode-title">Local game</span>
+            <span class="mode-description">Play with someone beside you</span>
+          </button>
+          <button class="mode-button" type="button" data-mode="computer">
+            <span class="mode-title">Play computer</span>
+            <span class="mode-description">Practice against the computer</span>
+          </button>
+          <button class="mode-button" type="button" data-mode="online">
+            <span class="mode-title">Online game</span>
+            <span class="mode-description">Create or join a room</span>
+          </button>
+        </div>
+      </section>
+
+      <section id="game-screen" class="game-screen" hidden aria-label="Chess game">
+        <div id="game-status" class="game-status" role="status" aria-live="polite">
+          White to move
+        </div>
+        <div id="chessboard" class="chessboard" aria-label="Chessboard"></div>
+        <div class="game-controls">
+          <button id="undo-button" type="button">Undo</button>
+          <button id="draw-button" type="button">Offer draw</button>
+          <button id="resign-button" type="button">Resign</button>
+          <button id="back-button" type="button">Back to menu</button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <span>Lelele Games</span>
+      <span>Think carefully. Enjoy the game.</span>
+    </footer>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
